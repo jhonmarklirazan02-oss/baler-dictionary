@@ -1,50 +1,60 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const authMiddleware = require('../middleware/auth');
 const adminAuth = require('../middleware/adminAuth');
 
-const audioDir = path.join(__dirname, '../uploads/audio');
-if (!fs.existsSync(audioDir)) {
-  fs.mkdirSync(audioDir, { recursive: true });
-}
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, audioDir);
-  },
-  filename: (req, file, cb) => {
-    let originalName = file.originalname;
-    const ext = path.extname(originalName).toLowerCase();
-    const nameWithoutExt = path.basename(originalName, ext);
-    
-    const uniqueName = `${Date.now()}-${nameWithoutExt}${ext}`;
-    cb(null, uniqueName);
+// Configure Cloudinary storage for Multer
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'baler-dictionary/audio', // Folder in Cloudinary
+    resource_type: 'auto', // Automatically detect file type
+    allowed_formats: ['mp3', 'wav', 'ogg', 'm4a', 'webm'],
+    public_id: (req, file) => {
+      // Generate unique filename
+      const nameWithoutExt = file.originalname.replace(/\.[^/.]+$/, '');
+      return `${Date.now()}-${nameWithoutExt}`;
+    }
   }
 });
 
 const fileFilter = (req, file, cb) => {
-  const ext = path.extname(file.originalname).toLowerCase();
-  const allowedExtensions = ['.mp3', '.wav', '.ogg', '.m4a', '.webm'];
-  
-  if (allowedExtensions.includes(ext)) {
+  const allowedMimeTypes = [
+    'audio/mpeg',       // mp3
+    'audio/wav',        // wav
+    'audio/wave',       // wav
+    'audio/ogg',        // ogg
+    'audio/mp4',        // m4a
+    'audio/x-m4a',      // m4a
+    'audio/webm'        // webm
+  ];
+
+  if (allowedMimeTypes.includes(file.mimetype)) {
     console.log('✅ File accepted:', file.originalname, 'Type:', file.mimetype);
     return cb(null, true);
   } else {
     console.log('❌ File rejected:', file.originalname, 'Type:', file.mimetype);
-    cb(new Error(`Only audio files are allowed (${allowedExtensions.join(', ')}). You uploaded: ${ext}`));
+    cb(new Error(`Only audio files are allowed. You uploaded: ${file.mimetype}`));
   }
 };
 
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, //10 mb
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
   fileFilter: fileFilter
 });
 
-// Admin-only route - requires authentication
+// Admin-only route - Upload audio to Cloudinary
 router.post('/', authMiddleware, adminAuth, (req, res) => {
   upload.single('audio')(req, res, (err) => {
     if (err instanceof multer.MulterError) {
@@ -62,37 +72,41 @@ router.post('/', authMiddleware, adminAuth, (req, res) => {
       return res.status(400).json({ message: 'No file uploaded' });
     }
 
-    console.log('✅ Audio uploaded successfully:', req.file.filename);
-    console.log('📁 Saved to:', path.join(audioDir, req.file.filename));
+    console.log('✅ Audio uploaded to Cloudinary:', req.file.filename);
+    console.log('🌐 Cloudinary URL:', req.file.path);
 
     res.json({
       message: 'File uploaded successfully',
-      filename: req.file.filename,
+      filename: req.file.filename, // Cloudinary public_id
+      url: req.file.path, // Full Cloudinary URL
       originalName: req.file.originalname,
       size: req.file.size
     });
   });
 });
 
-// Admin-only route - requires authentication
-router.delete('/:filename', authMiddleware, adminAuth, (req, res) => {
+// Admin-only route - Delete audio from Cloudinary
+router.delete('/:filename', authMiddleware, adminAuth, async (req, res) => {
   try {
     const filename = req.params.filename;
-    const filePath = path.join(audioDir, filename);
+    // The public_id includes the folder path
+    const publicId = `baler-dictionary/audio/${filename}`;
 
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-      console.log('✅ File deleted:', filename);
+    const result = await cloudinary.uploader.destroy(publicId, { resource_type: 'video' });
+
+    if (result.result === 'ok') {
+      console.log('✅ File deleted from Cloudinary:', filename);
       res.json({ message: 'File deleted successfully' });
     } else {
+      console.log('⚠️ File not found in Cloudinary:', filename);
       res.status(404).json({ message: 'File not found' });
     }
 
   } catch (error) {
     console.error('❌ Delete error:', error);
-    res.status(500).json({ 
-      message: 'File deletion failed', 
-      error: error.message 
+    res.status(500).json({
+      message: 'File deletion failed',
+      error: error.message
     });
   }
 });

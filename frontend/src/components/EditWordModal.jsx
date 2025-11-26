@@ -124,7 +124,8 @@ function EditWordModal({ isOpen, onClose, onWordUpdated, token, word }) {
         throw new Error(data.message || 'Upload failed');
       }
 
-      return data.filename;
+      // Return the full Cloudinary URL instead of just filename
+      return data.url || data.filename;
 
     } catch (err) {
       setUploadError(err.message);

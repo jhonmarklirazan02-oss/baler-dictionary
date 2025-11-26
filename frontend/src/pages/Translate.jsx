@@ -68,7 +68,11 @@ function Translate() {
 
   const playAudio = (audioFile) => {
     if (audioFile) {
-      const audio = new Audio(`${API_URL}/audio/${audioFile}`);
+      // Check if audio is a full URL (Cloudinary) or just a filename (legacy)
+      const audioUrl = audioFile.startsWith('http')
+        ? audioFile
+        : `${API_URL}/audio/${audioFile}`;
+      const audio = new Audio(audioUrl);
       audio.play().catch(err => console.error('Audio play failed:', err));
     }
   };

@@ -4,7 +4,11 @@ import API_URL from '../config/api';
 function WordDetailModal({ isOpen, onClose, word }) {
   const playAudio = () => {
     if (word?.audio) {
-      const audio = new Audio(`${API_URL}/audio/${word.audio}`);
+      // Check if audio is a full URL (Cloudinary) or just a filename (legacy)
+      const audioUrl = word.audio.startsWith('http')
+        ? word.audio
+        : `${API_URL}/audio/${word.audio}`;
+      const audio = new Audio(audioUrl);
       audio.play().catch(err => console.error('Audio play failed:', err));
     }
   };
